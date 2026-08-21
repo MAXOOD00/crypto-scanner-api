@@ -13,22 +13,25 @@ app.use((req, res, next) => {
 });
 
 app.get('/', async (req, res) => {
+  // لیست کامل‌تر ارزهای پرطرفدار
   const symbols = [
-    { binance: "BTCUSDT", symbol: "BTCUSDT" },
-    { binance: "ETHUSDT", symbol: "ETHUSDT" },
-    { binance: "SOLUSDT", symbol: "SOLUSDT" },
-    { binance: "XRPUSDT", symbol: "XRPUSDT" },
-    { binance: "ADAUSDT", symbol: "ADAUSDT" }
+    "BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "ADAUSDT", 
+    "AVAXUSDT", "DOGEUSDT", "DOTUSDT", "LINKUSDT", "MATICUSDT"
   ];
   
-  const timeframes = ["4h", "1d"];
+  // تایم‌فریم‌های درخواستی: 4H, 1D, 1W
+  const timeframes = [
+    { code: "4h", label: "4H" },
+    { code: "1d", label: "1D" },
+    { code: "1w", label: "1W" }
+  ];
+
   let signals = [];
 
-  for (let item of symbols) {
+  for (let symbol of symbols) {
     for (let tf of timeframes) {
       try {
-        let binanceTf = tf === "4h" ? "4h" : "1d";
-        const response = await fetch(`https://api.binance.com/api/v3/klines?symbol=${item.binance}&interval=${binanceTf}&limit=50`);
+        const response = await fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${tf.code}&limit=50`);
         
         if (response.ok) {
           const data = await response.json();
@@ -36,12 +39,15 @@ app.get('/', async (req, res) => {
             let closes = data.map(c => parseFloat(c[4]));
             let highs = data.map(c => parseFloat(c[2]));
             let lows = data.map(c => parseFloat(c[3]));
+            let currentPrice = closes[closes.length - 1];
 
             let result = evaluateConfluence(highs, lows, closes);
 
+            // اضافه کردن فیلد price به خروجی برای رفع مشکل null
             signals.push({
-              symbol: item.symbol,
-              tf: tf.toUpperCase(),
+              symbol: symbol,
+              tf: tf.label,
+              price: currentPrice > 10 ? currentPrice.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : currentPrice.toFixed(4),
               score: result.score,
               type: result.type
             });
@@ -53,7 +59,7 @@ app.get('/', async (req, res) => {
 
   // اگر به هر دلیلی لیست خالی بود
   if (signals.length === 0) {
-    signals.push({ symbol: "BTCUSDT", tf: "4H", score: "75%", type: "BUY" });
+    signals.push({ symbol: "BTCUSDT", tf: "4H", price: "90000.00", score: "75%", type: "BUY" });
   }
 
   res.json(signals);
