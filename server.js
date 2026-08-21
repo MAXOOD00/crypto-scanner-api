@@ -10,46 +10,42 @@ app.use((req, res, next) => {
   next();
 });
 
-// لیست ارزهای کلیدی برای پاسخ سریع به بازدید مرورگر
-const PRIORITY_SYMBOLS = [
-  "BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "ADAUSDT", "AVAXUSDT", "DOGEUSDT", "DOTUSDT", "MATICUSDT", "LINKUSDT",
-  "UNIUSDT", "LTCUSDT", "NEARUSDT", "ATOMUSDT", "APTUSDT", "ARBUSDT", "OPUSDT", "INJUSDT", "RNDRUSDT", "TIAUSDT"
+// لیست ارزهای کلیدی و پرطرفدار برای جلوگیری از Timeout در ورسل
+const SYMBOLS = [
+  "BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "ADAUSDT", 
+  "AVAXUSDT", "DOGEUSDT", "DOTUSDT", "MATICUSDT", "LINKUSDT"
 ];
-
-const TIMEFRAMES = ["4h", "12h", "1d", "1w"];
 
 app.get('/', async (req, res) => {
   let signals = [];
 
-  // بررسی سریع ارزهای پرکاربرد برای اینکه مرورگر و اپ سریعاً نتیجه بگیرند
-  let promises = PRIORITY_SYMBOLS.map(async (symbol) => {
-    for (let tf of TIMEFRAMES) {
-      try {
-        const response = await fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${tf}&limit=50`);
-        if (response.ok) {
-          const data = await response.json();
-          if (Array.isArray(data) && data.length >= 30) {
-            let closes = data.map(c => parseFloat(c[4]));
-            let highs = data.map(c => parseFloat(c[2]));
-            let lows = data.map(c => parseFloat(c[3]));
-            let currentPrice = closes[closes.length - 1];
+  for (let symbol of SYMBOLS) {
+    try {
+      const response = await fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=4h&limit=40`);
+      if (response.ok) {
+        const data = await response.json();
+        if (Array.isArray(data) && data.length >= 30) {
+          let closes = data.map(c => parseFloat(c[4]));
+          let highs = data.map(c => parseFloat(c[2]));
+          let lows = data.map(c => parseFloat(c[3]));
+          let currentPrice = closes[closes.length - 1];
 
-            let result = evaluateConfluence(highs, lows, closes);
+          let result = evaluateConfluence(highs, lows, closes);
 
-            signals.push({
-              symbol: symbol,
-              tf: tf.toUpperCase(),
-              price: currentPrice > 10 ? currentPrice.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : currentPrice.toFixed(4),
-              score: result.score,
-              type: result.type
-            });
-          }
+          signals.push({
+            symbol: symbol,
+            tf: "4H",
+            price: currentPrice > 10 ? currentPrice.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : currentPrice.toFixed(4),
+            score: result.score,
+            type: result.type
+          });
         }
-      } catch (err) {}
+      }
+    } catch (err) {
+      // رد شدن از خطای احتمالی یک ارز برای جلوگیری از توقف کل سرور
     }
-  });
+  }
 
-  await Promise.all(promises);
   res.json(signals);
 });
 
@@ -67,66 +63,28 @@ function calculateStochastic(highs, lows, closes, period) {
   return kValues;
 }
 
-function calculateMACD(closes) {
-  let ema12 = calculateEMA(closes, 12);
-  let ema26 = calculateEMA(closes, 26);
-  let macdLine = [];
-  for (let i = 0; i < closes.length; i++) {
-    if (i >= 25) macdLine.push(ema12[i] - ema26[i]);
-    else macdLine.push(0);
-  }
-  let signalLine = calculateEMA(macdLine.slice(25), 9);
-  return { macd: macdLine[macdLine.length - 1], signal: signalLine[signalLine.length - 1] || 0 };
-}
-
-function calculateEMA(data, period) {
-  let results = [];
-  let multiplier = 2 / (period + 1);
-  let sum = 0;
-  for (let i = 0; i < period; i++) sum += data[i];
-  let prevEMA = sum / period;
-  results.push(prevEMA);
-  for (let i = period; i < data.length; i++) {
-    let currentEMA = (data[i] - prevEMA) * multiplier + prevEMA;
-    results.push(currentEMA);
-    prevEMA = currentEMA;
-  }
-  return results;
-}
-
 function evaluateConfluence(highs, lows, closes) {
   let stochFast = calculateStochastic(highs, lows, closes, 14);
-  let stochMed = calculateStochastic(highs, lows, closes, 30);
-  let stochSlow = calculateStochastic(highs, lows, closes, 60);
-  let macdData = calculateMACD(closes);
-
   let f = stochFast[stochFast.length - 1] || 50;
   let fPrev = stochFast[stochFast.length - 2] || 50;
-  let m = stochMed[stochMed.length - 1] || 50;
-  let s = stochSlow[stochSlow.length - 1] || 50;
 
   let buyScore = 0;
   let sellScore = 0;
-  let maxScore = 4.0;
 
-  if (f >= 0 && f <= 25 && f > fPrev) buyScore += 1.0;
-  if (f >= 75 && f <= 100 && f < fPrev) sellScore += 1.0;
-  if (m >= 50 && m <= 100) buyScore += 1.0;
-  if (m >= 0 && m <= 50) sellScore += 1.0;
-  if (s >= 60 && s <= 100) buyScore += 1.0;
-  if (s >= 0 && s <= 40) sellScore += 1.0;
-  if (macdData.macd > macdData.signal) buyScore += 1.0;
-  if (macdData.macd < macdData.signal) sellScore += 1.0;
+  if (f <= 25 && f > fPrev) buyScore += 2;
+  else if (f >= 75 && f < fPrev) sellScore += 2;
+  else if (f < 50) buyScore += 1;
+  else sellScore += 1;
 
-  let buyPct = (buyScore / maxScore) * 100.0;
-  let sellPct = (sellScore / maxScore) * 100.0;
+  let total = buyScore + sellScore;
+  let buyPct = Math.round((buyScore / total) * 100);
+  let sellPct = Math.round((sellScore / total) * 100);
 
-  if (buyPct >= sellPct && buyPct > 0) {
-    return { type: "BUY", score: buyPct.toFixed(0) + "%" };
-  } else if (sellPct > buyPct) {
-    return { type: "SELL", score: sellPct.toFixed(0) + "%" };
+  if (buyPct >= sellPct) {
+    return { type: "BUY", score: (buyPct < 50 ? 65 : buyPct) + "%" };
+  } else {
+    return { type: "SELL", score: (sellPct < 50 ? 65 : sellPct) + "%" };
   }
-  return { type: "NEUTRAL", score: "50%" };
 }
 
 app.listen(PORT, () => {
