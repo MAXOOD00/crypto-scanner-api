@@ -10,55 +10,46 @@ app.use((req, res, next) => {
   next();
 });
 
-// لیست جامع ۲۰۰+ ارز برتر بازار (قابل گسترش تا بی‌نهایت)
-const ALL_SYMBOLS = [
+// لیست ارزهای کلیدی برای پاسخ سریع به بازدید مرورگر
+const PRIORITY_SYMBOLS = [
   "BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "ADAUSDT", "AVAXUSDT", "DOGEUSDT", "DOTUSDT", "MATICUSDT", "LINKUSDT",
-  "UNIUSDT", "LTCUSDT", "BCHUSDT", "NEARUSDT", "ATOMUSDT", "ETCUSDT", "XLMUSDT", "ICPUSDT", "APTUSDT", "FILUSDT",
-  "HBARUSDT", "ARBUSDT", "OPUSDT", "INJUSDT", "RNDRUSDT", "TIAUSDT", "SUIUSDT", "SEIUSDT", "PEPEUSDT", "SHIBUSDT",
-  "FLOKIUSDT", "BONKUSDT", "FETUSDT", "AGIXUSDT", "OCEANUSDT", "GALAUSDT", "SANDUSDT", "MANAUSDT", "AXSUSDT", "IMXUSDT",
-  "FTMUSDT", "ALGOUSDT", "GRTUSDT", "STXUSDT", "KASUSDT", "THETAUSDT", "EGLDUSDT", "FLOWUSDT", "KAVAUSDT", "CRVUSDT",
-  "MKRUSDT", "AAVEUSDT", "SNXUSDT", "COMPUSDT", "ENJUSDT", "CHZUSDT", "ZILUSDT", "BATUSDT", "ZRXUSDT", "DASHUSDT",
-  "XMRUSDT", "ZECUSDT", "ZENUSDT", "IOSTUSDT", "ONTUSDT", "QTUMUSDT", "ICXUSDT", "IOUSDT", "WLDUSDT", "PORTALUSDT"
-  // می‌توانید هر تعداد ارز دیگر که خواستید به این آرایه اضافه کنید
+  "UNIUSDT", "LTCUSDT", "NEARUSDT", "ATOMUSDT", "APTUSDT", "ARBUSDT", "OPUSDT", "INJUSDT", "RNDRUSDT", "TIAUSDT"
 ];
 
-const TIMEFRAMES = ["4h", "8h", "12h", "1d", "1w"];
+const TIMEFRAMES = ["4h", "12h", "1d", "1w"];
 
 app.get('/', async (req, res) => {
   let signals = [];
 
-  // پردازش دسته‌ای برای سرعت بالا و عدم برخورد با محدودیت سرور
-  for (let i = 0; i < ALL_SYMBOLS.length; i += 10) {
-    let batch = ALL_SYMBOLS.slice(i, i + 10);
-    let promises = batch.map(async (symbol) => {
-      for (let tf of TIMEFRAMES) {
-        try {
-          const response = await fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${tf}&limit=60`);
-          if (response.ok) {
-            const data = await response.json();
-            if (Array.isArray(data) && data.length >= 40) {
-              let closes = data.map(c => parseFloat(c[4]));
-              let highs = data.map(c => parseFloat(c[2]));
-              let lows = data.map(c => parseFloat(c[3]));
-              let currentPrice = closes[closes.length - 1];
+  // بررسی سریع ارزهای پرکاربرد برای اینکه مرورگر و اپ سریعاً نتیجه بگیرند
+  let promises = PRIORITY_SYMBOLS.map(async (symbol) => {
+    for (let tf of TIMEFRAMES) {
+      try {
+        const response = await fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${tf}&limit=50`);
+        if (response.ok) {
+          const data = await response.json();
+          if (Array.isArray(data) && data.length >= 30) {
+            let closes = data.map(c => parseFloat(c[4]));
+            let highs = data.map(c => parseFloat(c[2]));
+            let lows = data.map(c => parseFloat(c[3]));
+            let currentPrice = closes[closes.length - 1];
 
-              let result = evaluateConfluence(highs, lows, closes);
+            let result = evaluateConfluence(highs, lows, closes);
 
-              signals.push({
-                symbol: symbol,
-                tf: tf.toUpperCase(),
-                price: currentPrice.toLocaleString(),
-                score: result.score,
-                type: result.type
-              });
-            }
+            signals.push({
+              symbol: symbol,
+              tf: tf.toUpperCase(),
+              price: currentPrice > 10 ? currentPrice.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : currentPrice.toFixed(4),
+              score: result.score,
+              type: result.type
+            });
           }
-        } catch (err) {}
-      }
-    });
-    await Promise.all(promises);
-  }
+        }
+      } catch (err) {}
+    }
+  });
 
+  await Promise.all(promises);
   res.json(signals);
 });
 
