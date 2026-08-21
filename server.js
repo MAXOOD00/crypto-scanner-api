@@ -1,7 +1,6 @@
 const express = require('express');
 const fetch = require('node-fetch');
 const app = express();
-const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
 app.use((req, res, next) => {
@@ -10,7 +9,6 @@ app.use((req, res, next) => {
   next();
 });
 
-// لیست ارزهای کلیدی و پرطرفدار برای جلوگیری از Timeout در ورسل
 const SYMBOLS = [
   "BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "ADAUSDT", 
   "AVAXUSDT", "DOGEUSDT", "DOTUSDT", "MATICUSDT", "LINKUSDT"
@@ -42,7 +40,7 @@ app.get('/', async (req, res) => {
         }
       }
     } catch (err) {
-      // رد شدن از خطای احتمالی یک ارز برای جلوگیری از توقف کل سرور
+      // رد شدن از خطای احتمالی
     }
   }
 
@@ -87,6 +85,5 @@ function evaluateConfluence(highs, lows, closes) {
   }
 }
 
-app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
-});
+// مهم: در ورسل نباید app.listen وجود داشته باشد
+module.exports = app;
