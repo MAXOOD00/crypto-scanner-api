@@ -3,48 +3,41 @@ const fetch = require('node-fetch');
 const app = express();
 
 app.use(express.json());
-app.use((req, res, next) => {
-  res.header("Access-Control-Allow-Origin", "*");
-  res.header("Access-Control-Allow-Headers", "*");
-  next();
-});
 
-const SYMBOLS = [
-  "BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "ADAUSDT", 
-  "AVAXUSDT", "DOGEUSDT", "DOTUSDT", "MATICUSDT", "LINKUSDT"
-];
+const SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "ADAUSDT", "AVAXUSDT", "DOGEUSDT", "DOTUSDT", "MATICUSDT", "LINKUSDT"];
 
 app.get('/', async (req, res) => {
-  let signals = [];
-
-  for (let symbol of SYMBOLS) {
+  // اجرای همزمان همه درخواست‌ها برای جلوگیری از Timeout
+  const promises = SYMBOLS.map(async (symbol) => {
     try {
       const response = await fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=4h&limit=40`);
-      if (response.ok) {
-        const data = await response.json();
-        if (Array.isArray(data) && data.length >= 30) {
-          let closes = data.map(c => parseFloat(c[4]));
-          let highs = data.map(c => parseFloat(c[2]));
-          let lows = data.map(c => parseFloat(c[3]));
-          let currentPrice = closes[closes.length - 1];
+      if (!response.ok) return null;
+      const data = await response.json();
+      
+      if (Array.isArray(data) && data.length >= 30) {
+        let closes = data.map(c => parseFloat(c[4]));
+        let highs = data.map(c => parseFloat(c[2]));
+        let lows = data.map(c => parseFloat(c[3]));
+        let currentPrice = closes[closes.length - 1];
+        let result = evaluateConfluence(highs, lows, closes);
 
-          let result = evaluateConfluence(highs, lows, closes);
-
-          signals.push({
-            symbol: symbol,
-            tf: "4H",
-            price: currentPrice > 10 ? currentPrice.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : currentPrice.toFixed(4),
-            score: result.score,
-            type: result.type
-          });
-        }
+        return {
+          symbol: symbol,
+          tf: "4H",
+          price: currentPrice.toFixed(4),
+          score: result.score,
+          type: result.type
+        };
       }
     } catch (err) {
-      // رد شدن از خطای احتمالی
+      return null;
     }
-  }
+    return null;
+  });
 
-  res.json(signals);
+  const results = await Promise.all(promises);
+  // حذف مقادیر null (درخواست‌های ناموفق)
+  res.json(results.filter(item => item !== null));
 });
 
 function calculateStochastic(highs, lows, closes, period) {
@@ -65,25 +58,12 @@ function evaluateConfluence(highs, lows, closes) {
   let stochFast = calculateStochastic(highs, lows, closes, 14);
   let f = stochFast[stochFast.length - 1] || 50;
   let fPrev = stochFast[stochFast.length - 2] || 50;
-
-  let buyScore = 0;
-  let sellScore = 0;
-
-  if (f <= 25 && f > fPrev) buyScore += 2;
-  else if (f >= 75 && f < fPrev) sellScore += 2;
-  else if (f < 50) buyScore += 1;
-  else sellScore += 1;
-
+  let buyScore = (f <= 25 && f > fPrev) ? 2 : (f < 50 ? 1 : 0);
+  let sellScore = (f >= 75 && f < fPrev) ? 2 : (f > 50 ? 1 : 0);
   let total = buyScore + sellScore;
-  let buyPct = Math.round((buyScore / total) * 100);
-  let sellPct = Math.round((sellScore / total) * 100);
-
-  if (buyPct >= sellPct) {
-    return { type: "BUY", score: (buyPct < 50 ? 65 : buyPct) + "%" };
-  } else {
-    return { type: "SELL", score: (sellPct < 50 ? 65 : sellPct) + "%" };
-  }
+  let buyPct = total === 0 ? 50 : Math.round((buyScore / total) * 100);
+  let sellPct = total === 0 ? 50 : Math.round((sellScore / total) * 100);
+  return buyPct >= sellPct ? { type: "BUY", score: (buyPct < 50 ? 65 : buyPct) + "%" } : { type: "SELL", score: (sellPct < 50 ? 65 : sellPct) + "%" };
 }
 
-// مهم: در ورسل نباید app.listen وجود داشته باشد
 module.exports = app;
